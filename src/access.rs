@@ -18,12 +18,16 @@ limitations under the License.
 // * https://docs.atlassian.com/software/jira/docs/api/REST/latest/
 // * https://docs.atlassian.com/jira-software/REST/latest/
 
+use reqwest::RequestBuilder;
+use serde::Serialize;
 use crate::errors::JiraQueryError;
-use crate::issue_model::{Issue, JqlResults};
+use crate::issue_model::{Issue, JqlResults, Release};
+use crate::Version;
 
 // The prefix of every subsequent REST request.
 // This string comes directly after the host in the URL.
 const REST_PREFIX: &str = "rest/api/2";
+const VERSION_PREFIX: &str = "version";
 
 /// Configuration and credentials to access a Jira instance.
 pub struct JiraInstance {
@@ -146,13 +150,19 @@ impl JiraInstance {
 
     /// Download the specified URL using the configured authentication.
     async fn authenticated_get(&self, url: &str) -> Result<reqwest::Response, reqwest::Error> {
-        let request_builder = self.client.get(url);
-        let authenticated = match &self.auth {
+        self.authenticated(self.client.get(url)).send().await
+    }
+
+    async fn authenticated_put<T: Serialize + ?Sized>(&self, url: &str, json: &T) -> Result<reqwest::Response, reqwest::Error> {
+        self.authenticated(self.client.put(url)).json(json).send().await
+    }
+
+    fn authenticated(&self, request_builder: RequestBuilder) -> RequestBuilder {
+        match &self.auth {
             Auth::Anonymous => request_builder,
             Auth::ApiKey(key) => request_builder.header("Authorization", &format!("Bearer {key}")),
             Auth::Basic { user, password } => request_builder.basic_auth(user, Some(password)),
-        };
-        authenticated.send().await
+        }
     }
 
     // This method uses a separate implementation from `issues` because Jira provides a way
@@ -272,19 +282,24 @@ impl JiraInstance {
             Ok(issues)
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        let result = 2 + 2;
-        assert_eq!(result, 4);
+    pub async fn release(&self, key: &str, released: bool, archived: bool) -> Result<Version, JiraQueryError> {
+        let url = format!(
+            "{}/{}/{}/{}",
+            self.host,
+            REST_PREFIX,
+            VERSION_PREFIX,
+            key,
+        );
+
+        let release = Release {
+            released, archived
+        };
+
+        let version = self.authenticated_put(&url, &release).await?.json::<Version>().await?;
+
+        log::debug!("{:#?}", version);
+
+        Ok(version)
     }
-    // #[test]
-    // fn issues() {
-    //     let results = crate::issues("todo", &["todo"], "todo");
-    //     eprintln!("{:#?}", results);
-    //     assert_eq!(results.issues.len(), todo);
-    // }
 }

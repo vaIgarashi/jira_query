@@ -430,3 +430,9 @@ pub struct Security {
     #[serde(flatten)]
     pub extra: Value,
 }
+
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct Release {
+    pub archived: bool,
+    pub released: bool,
+}
